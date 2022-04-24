@@ -34,7 +34,6 @@
 
 -- MAGIC %python
 -- MAGIC spark.conf.set("spark.sql.shuffle.partitions", 1905)
--- MAGIC print(type(start_date))
 
 -- COMMAND ----------
 
@@ -44,14 +43,14 @@
 -- COMMAND ----------
 
 -- MAGIC %python
--- MAGIC blocks = spark.sql("select * from blocks")
--- MAGIC contracts = spark.sql("select * from contracts")
--- MAGIC logs = spark.sql("select * from logs")
--- MAGIC receipts = spark.sql("select * from receipts")
--- MAGIC tokentransfers = spark.sql("select * from token_transfers")
--- MAGIC tokens = spark.sql("select * from tokens")
--- MAGIC tokenpricesusd = spark.sql("select * from token_prices_usd")
--- MAGIC transactions = spark.sql("select * from transactions")
+-- MAGIC blocks_df = spark.sql("select * from blocks")
+-- MAGIC contracts_df = spark.sql("select * from contracts")
+-- MAGIC logs_df = spark.sql("select * from logs")
+-- MAGIC receipts_df = spark.sql("select * from receipts")
+-- MAGIC tokentransfers_df = spark.sql("select * from token_transfers")
+-- MAGIC tokens_df = spark.sql("select * from tokens")
+-- MAGIC tokenpricesusd_df = spark.sql("select * from token_prices_usd")
+-- MAGIC transactions_df = spark.sql("select * from transactions")
 
 -- COMMAND ----------
 
@@ -88,6 +87,7 @@ limit 1;
 -- COMMAND ----------
 
 -- TBD
+-- ASK
 select count(*) from contracts inner join tokens on contracts.address = tokens.address
 
 -- COMMAND ----------
@@ -98,6 +98,7 @@ select count(*) from contracts inner join tokens on contracts.address = tokens.a
 -- COMMAND ----------
 
 -- TBD
+-- ASK
 select count(*) from transactions where to_address = "";
 select count(*) from contracts join transactions on contracts.address = transactions.from_address;
 
@@ -141,6 +142,7 @@ select count(*) from token_transfers;
 -- COMMAND ----------
 
 -- TBD
+-- ASK
 select count(*) as num_of_transactions, block_number from transactions group by block_number;
 
 -- COMMAND ----------
@@ -152,7 +154,8 @@ select count(*) as num_of_transactions, block_number from transactions group by 
 -- COMMAND ----------
 
 -- TBD
--- IDK 
+-- ASK
+SELECT transaction_count/15 from blocks order by transaction_count desc limit 1;
 
 -- COMMAND ----------
 
@@ -163,6 +166,7 @@ select count(*) as num_of_transactions, block_number from transactions group by 
 -- COMMAND ----------
 
 -- TBD
+-- ASK
 select sum(value)/1000000000000000000 as total_ether_volume from transactions;
 
 -- COMMAND ----------
@@ -176,6 +180,7 @@ select sum(gas_used) as total_gas from receipts;
 
 -- COMMAND ----------
 
+-- Delete it later
 select sum(cumulative_gas) from (select max(cumulative_gas_used) as cumulative_gas from receipts group by block_hash);
 
 -- COMMAND ----------
@@ -186,7 +191,8 @@ select sum(cumulative_gas) from (select max(cumulative_gas_used) as cumulative_g
 -- COMMAND ----------
 
 -- TBD
-select count(*) as num_transactions from token_transfers group by transaction_hash order by num_transactions desc;
+-- ASK?
+select count(*) as num_transactions from token_transfers group by transaction_hash order by num_transactions desc limit 1;
 
 -- COMMAND ----------
 
@@ -195,22 +201,26 @@ select count(*) as num_transactions from token_transfers group by transaction_ha
 
 -- COMMAND ----------
 
-CREATE VIEW IF NOT EXISTS blocks_date AS
-(SELECT *, FROM_UNIXTIME(timestamp,'y-M-d') AS time_date FROM blocks);
+-- MAGIC %python
+-- MAGIC from pyspark.sql.functions import to_date, col
+-- MAGIC timestampDF = blocks_df.withColumn("timestamp", to_date(col("timestamp").cast("timestamp")))
+-- MAGIC display(timestampDF)
 
 -- COMMAND ----------
 
-select * from blocks_date join token_transfers on blocks_date. number = token_transfers. block_number 
-where time_date < "2022-01-01" and (from_address = "0xf02d7ee27ff9b2279e76a60978bf8cca9b18a3ff" or to_address = "0xf02d7ee27ff9b2279e76a60978bf8cca9b18a3ff");
-
--- COMMAND ----------
-
-spark.sql("select * from blocks_date join token_transfers on blocks_date. number = token_transfers. block_number where time_date < "2022-01-01" and (from_address = "0xf02d7ee27ff9b2279e76a60978bf8cca9b18a3ff" or to_address = "0xf02d7ee27ff9b2279e76a60978bf8cca9b18a3ff")")
+-- MAGIC %python
+-- MAGIC conversionsDF = timestampDF.join(tokentransfers_df,timestampDF.number == tokentransfers_df.block_number,"inner").filter((col("timestamp") < start_date) & ((col("to_address") == wallet_address) | (col("from_address") == wallet_address)))
+-- MAGIC display(conversionsDF)
 
 -- COMMAND ----------
 
 -- MAGIC %md
 -- MAGIC ## Viz the transaction count over time (network use)
+
+-- COMMAND ----------
+
+CREATE VIEW IF NOT EXISTS blocks_date AS
+(SELECT *, FROM_UNIXTIME(timestamp,'y-M-d') AS time_date FROM blocks);
 
 -- COMMAND ----------
 
