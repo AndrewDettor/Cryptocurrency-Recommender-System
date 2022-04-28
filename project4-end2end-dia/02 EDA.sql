@@ -33,7 +33,8 @@
 -- COMMAND ----------
 
 -- MAGIC %python
--- MAGIC spark.conf.set("spark.sql.shuffle.partitions", 1905)
+-- MAGIC spark.conf.set("spark.sql.shuffle.partitions", "auto")
+-- MAGIC spark.conf.set("spark.sql.execution.arrow.enabled", "true")
 
 -- COMMAND ----------
 
@@ -61,9 +62,9 @@
 
 -- MAGIC %python
 -- MAGIC # Use block table
--- MAGIC block_max = blocks.agg({"number": "max"}).collect()[0][0]
+-- MAGIC block_max = blocks_df.agg({"number": "max"}).collect()[0][0]
 -- MAGIC print("The maximum block number is "+ str(block_max))
--- MAGIC timestampDF = blocks.withColumn("timestamp", (col("timestamp")).cast(TimestampType()))
+-- MAGIC timestampDF = blocks_df.withColumn("timestamp", (col("timestamp")).cast(TimestampType()))
 -- MAGIC stamp_max = timestampDF.agg({"timestamp": "max"}).collect()[0][0]
 -- MAGIC print("The maximum date of bloack is "+ str(stamp_max))
 
@@ -75,7 +76,7 @@
 -- COMMAND ----------
 
 select blocks.number from blocks 
-inner join token_transfers on blocks.number = token_transfers.block_number 
+inner join g09_db.erc20_token_transfers on blocks.number = g09_db.erc20_token_transfers.block_number 
 order by blocks.timestamp 
 limit 1;
 
@@ -87,8 +88,7 @@ limit 1;
 -- COMMAND ----------
 
 -- TBD
--- ASK
-select count(*) from contracts inner join tokens on contracts.address = tokens.address
+select count(*) from silver_contracts where is_erc20 = True;
 
 -- COMMAND ----------
 
@@ -98,9 +98,7 @@ select count(*) from contracts inner join tokens on contracts.address = tokens.a
 -- COMMAND ----------
 
 -- TBD
--- ASK
-select count(*) from transactions where to_address = "";
-select count(*) from contracts join transactions on contracts.address = transactions.from_address;
+select (count(*)/(select count(*) from transactions))*100 from silver_contracts join transactions on silver_contracts.address = transactions.to_address;
 
 -- COMMAND ----------
 
@@ -110,7 +108,8 @@ select count(*) from contracts join transactions on contracts.address = transact
 -- COMMAND ----------
 
 -- TBD
-select token_address, count(*) as num_transfer from token_transfers group by token_address order by num_transfer desc limit 100;
+select distinct tokens.name, token_address, num_transfer from ((select token_address, count(*) as num_transfer from token_transfers group by token_address order by num_transfer desc limit 100) as top_100) left join tokens on top_100.token_address = tokens.address order by num_transfer desc;
+-- the reason the query showing 102 rows is that the same token address has two different token names.(that's wired but we actually find the top100 tokens based on transfer count)
 
 -- COMMAND ----------
 
@@ -121,17 +120,8 @@ select token_address, count(*) as num_transfer from token_transfers group by tok
 -- COMMAND ----------
 
 -- TBD
-select count(*) from
-(select token_address, count(*) as num_transfer from token_transfers group by token_address, to_address having num_transfer = 1)
-
--- COMMAND ----------
-
-select count(*) from token_transfers;
-
--- COMMAND ----------
-
--- MAGIC %python
--- MAGIC print("The fraction is " + str(168150752/922029708))
+select (count(*)/(select count(*) from g09_db.erc20_token_transfers))*100 as fraction from
+(select token_address, count(*) as num_transfer from g09_db.erc20_token_transfers group by token_address, to_address having num_transfer = 1)
 
 -- COMMAND ----------
 
@@ -142,8 +132,16 @@ select count(*) from token_transfers;
 -- COMMAND ----------
 
 -- TBD
--- ASK
 select count(*) as num_of_transactions, block_number from transactions group by block_number;
+
+-- COMMAND ----------
+
+select * from transactions where block_number = "3089527";
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC Decreasing order
 
 -- COMMAND ----------
 
@@ -154,7 +152,6 @@ select count(*) as num_of_transactions, block_number from transactions group by 
 -- COMMAND ----------
 
 -- TBD
--- ASK
 SELECT transaction_count/15 from blocks order by transaction_count desc limit 1;
 
 -- COMMAND ----------
@@ -166,7 +163,6 @@ SELECT transaction_count/15 from blocks order by transaction_count desc limit 1;
 -- COMMAND ----------
 
 -- TBD
--- ASK
 select sum(value)/1000000000000000000 as total_ether_volume from transactions;
 
 -- COMMAND ----------
@@ -176,12 +172,7 @@ select sum(value)/1000000000000000000 as total_ether_volume from transactions;
 
 -- COMMAND ----------
 
-select sum(gas_used) as total_gas from receipts;
-
--- COMMAND ----------
-
--- Delete it later
-select sum(cumulative_gas) from (select max(cumulative_gas_used) as cumulative_gas from receipts group by block_hash);
+select sum(gas) as total_gas from transactions;
 
 -- COMMAND ----------
 
@@ -191,8 +182,7 @@ select sum(cumulative_gas) from (select max(cumulative_gas_used) as cumulative_g
 -- COMMAND ----------
 
 -- TBD
--- ASK?
-select count(*) as num_transactions from token_transfers group by transaction_hash order by num_transactions desc limit 1;
+select count(*) as num_transactions from g09_db.erc20_token_transfers where is_erc20 = True group by transaction_hash order by num_transactions desc limit 1;
 
 -- COMMAND ----------
 
@@ -214,19 +204,25 @@ select count(*) as num_transactions from token_transfers group by transaction_ha
 
 -- COMMAND ----------
 
+
+
+-- COMMAND ----------
+
 -- MAGIC %md
 -- MAGIC ## Viz the transaction count over time (network use)
 
 -- COMMAND ----------
 
+use g09_db;
 CREATE VIEW IF NOT EXISTS blocks_date AS
-(SELECT *, FROM_UNIXTIME(timestamp,'y-M-d') AS time_date FROM blocks);
+(SELECT *, FROM_UNIXTIME(timestamp,'y-M-d') AS time_date FROM ethereumetl.blocks);
 
 -- COMMAND ----------
 
 -- TBD
-select time_date, count(*) as trans_count from blocks_date join transactions 
-where blocks_date.number = transactions.block_number group by time_date order by time_date;
+use ethereumetl;
+select time_date, count(*) as trans_count from g09_db.blocks_date join transactions 
+where g09_db.blocks_date.number = transactions.block_number group by time_date order by time_date;
 
 -- COMMAND ----------
 
@@ -237,11 +233,15 @@ where blocks_date.number = transactions.block_number group by time_date order by
 -- COMMAND ----------
 
 -- TBD
-select time_date, count(*) as transfer_count from blocks_date join token_transfers 
-where blocks_date.number = token_transfers.block_number group by time_date order by time_date;
+select time_date, count(*) as transfer_count from g09_db.blocks_date join g09_db.erc20_token_transfers 
+where g09_db.blocks_date.number = g09_db.erc20_token_transfers.block_number group by time_date order by time_date;
 
 -- COMMAND ----------
 
 -- MAGIC %python
 -- MAGIC # Return Success
 -- MAGIC dbutils.notebook.exit(json.dumps({"exit_code": "OK"}))
+
+-- COMMAND ----------
+
+
