@@ -46,6 +46,12 @@ spark.conf.set('start.date',start_date)
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC CREATE table IF NOT EXISTS g09_db.erc20_token_transfers as
+# MAGIC (select * from ethereumetl.silver_contracts join ethereumetl.token_transfers on ethereumetl.silver_contracts.address = ethereumetl.token_transfers.token_address where ethereumetl.silver_contracts.is_erc20 = True);
+
+# COMMAND ----------
+
 blocks = spark.sql("select * from blocks")
 contracts = spark.sql("select * from contracts")
 logs = spark.sql("select * from logs")
@@ -55,7 +61,11 @@ tokens = spark.sql("select * from tokens")
 token_prices_usd = spark.sql("select * from token_prices_usd")
 transactions = spark.sql("select * from transactions")
 silver_contracts = spark.sql("select * from silver_contracts")
-silver_erc20_token_transfers = spark.sql("select * from silver_erc20_token_transfers")
+erc20_token_transfers = spark.sql("select * from g09_db.erc20_token_transfers")
+
+# COMMAND ----------
+
+from spark.sql.functions import *
 
 # COMMAND ----------
 
@@ -66,50 +76,27 @@ silver_erc20_token_transfers = spark.sql("select * from silver_erc20_token_trans
 
 # MAGIC %md
 # MAGIC ## Tokens Table
-# MAGIC - from token_prices_usd
-# MAGIC   - name
-# MAGIC   - links
-# MAGIC   - image
-# MAGIC   - address
-# MAGIC   - price_usd
-# MAGIC   - make sure asset_platform_id = ethereum
-# MAGIC - from silver_contracts
-# MAGIC   - make sure is_erc20 = True
-# MAGIC     - join on address
 
 # COMMAND ----------
 
-from pyspark.sql.functions import col, lit, isnan, count, array_union, array_except, explode, collect_set, concat, array_distinct
+Tokens_Table = (erc20_token_transfers.select("token_address")
+                                    .distinct()
+               )
 
-# COMMAND ----------
-
-Tokens_Table = (token_prices_usd.select(col("contract_address").alias("address"), col("name"), col("links"), col("image"), col("price_usd"))
-                .where(col("asset_platform_id") == lit("ethereum"))
+Tokens_Table = (Tokens_Table.join(token_prices_usd, Tokens_Table.token_address == token_prices_usd.contract_address, "inner")
+                            .select("token_address", "name", "links", "image", "price_usd")
+                                    
                )
 display(Tokens_Table)
 
 # COMMAND ----------
 
-display(Tokens_Table.select(isnan(col("price_usd"))))
+display(Tokens_Table.filter(isnan(col("price_usd"))))
 
 # COMMAND ----------
 
-Tokens_Table_erc20 = (Tokens_Table.join(silver_contracts, "address", "left")
-                            .filter(silver_contracts["is_erc20"] == lit(True))
-                            .select("address", "name", "links", "image", "price_usd", "is_erc20")
-                   )
-
-display(Tokens_Table_erc20)
-
-# COMMAND ----------
-
-group_path = "/mnt/dscc202-datasets/misc/G09"
-filename = "silver_erc20_tokens_table_adettor_g09_2020_01_01"
-Tokens_Table_erc20.write.format("delta").save(group_path + "/" + filename)
-
-# COMMAND ----------
-
-# dbutils.fs.rm("/mnt/dscc202-datasets/misc/G09/silver_erc20_tokens_table_adettor_g09", True)
+Tokens_Table = Tokens_Table.withColumn("id", monotonically_increasing_id())
+display(Tokens_Table)
 
 # COMMAND ----------
 
@@ -121,24 +108,20 @@ Tokens_Table_erc20.write.format("delta").save(group_path + "/" + filename)
 
 # COMMAND ----------
 
-Users_Table = (token_transfers.select(concat(col("to_address"), col("from_address")).alias("users"))
-                              .dropDuplicates()
-                              .filter(~col("users").contains(col("token_address")))
-              )
-
-# COMMAND ----------
-
+Users_Table = (erc20_token_transfers.select(explode(array(col("from_address"), col("to_address"))).alias("users"))
+               .distinct()
+               )
 display(Users_Table)
 
 # COMMAND ----------
 
-group_path = "/mnt/dscc202-datasets/misc/G09"
-filename = "silver_users_table_adettor_g09_2020_01_01"
-Users_Table.write.format("delta").save(group_path + "/" + filename)
+Users_Table = Users_Table.withColumn("id", monotonically_increasing_id())
+display(Users_Table)
 
 # COMMAND ----------
 
-# dbutils.fs.rm("/mnt/dscc202-datasets/misc/G09/silver_users_table_adettor_g09/", True)
+# MAGIC %sql
+# MAGIC use g09_db;
 
 # COMMAND ----------
 
@@ -154,30 +137,67 @@ Users_Table.write.format("delta").save(group_path + "/" + filename)
 
 # COMMAND ----------
 
-from pyspark.sql.functions import pandas_udf, PandasUDFType
+Users_Table.printSchema()
 
 # COMMAND ----------
 
-@pandas_udf("double", PandasUDFType.GROUPED_AGG)
-def afkszdjfjksdfh(user_address_col, token_address_col, token_price_usd_col, Start_Date)
+super_amazing_table = (timestampDF.join(erc20_token_transfers, timestampDF.number == erc20_token_transfers.block_number, "inner")
+                                  .filter((col("timestamp") < start_date)
+                                  .select("to_address", "from_address", "token_address", "value")    
+                                  .join(Tokens_Table_erc20, Tokens_Table_erc20.address = col("token_address"), "inner")
+                                  .filter(~col("from_address").contains(Users_Table.address))
+                                  .filter(~col("to_address").contains(Users_Table.address))   
+                                          
+                                          
+                            .filter((col("timestamp") < start_date) & ((col("to_address") == wallet_address) | (col("from_address") == wallet_address)))
+                 
+                )
 
 # COMMAND ----------
 
-spark.udf.register("sql_vectorized_udf", vectorizedUDF)
+# MAGIC %md
+# MAGIC from_address
 
 # COMMAND ----------
 
-CREATE VIEW IF NOT EXISTS blocks_date AS
-(SELECT *, FROM_UNIXTIME(timestamp,'y-M-d') AS time_date FROM blocks);
+timestampDF = blocks.withColumn("timestamp", to_date(col("timestamp").cast("timestamp")))
+display(timestampDF)
 
 # COMMAND ----------
 
-select * from blocks_date join token_transfers on blocks_date. number = token_transfers. block_number 
-where time_date < "2022-01-01" and (from_address = "0xf02d7ee27ff9b2279e76a60978bf8cca9b18a3ff" or to_address = "0xf02d7ee27ff9b2279e76a60978bf8cca9b18a3ff");
+conversionsDF = (timestampDF.join(erc20_token_transfers, timestampDF.number == erc20_token_transfers.block_number, "inner")
+                            .select("to_address", "from_address", "token_address", "value")
+                            .join(Tokens_Table_erc20, Tokens_Table_erc20.)
+                            .filter((col("timestamp") < start_date) & ((col("to_address") == wallet_address) | (col("from_address") == wallet_address)))
+                 
+                )
+display(conversionsDF)
+
+# COMMAND ----------
+
+# join on tokens table
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC for each token, find the net value (to=+tokens, from=-tokens)
+
+# COMMAND ----------
+
+@pandas_udf("double", PandasUDFType.SCALAR)
+def sum_value(user_address_col, token_address_col, token_price_usd_col, Start_Date)
+
+# COMMAND ----------
+
+dbutils.fs.ls("/mnt/dscc202-datasets/misc/G09/")
 
 # COMMAND ----------
 
 
+
+# COMMAND ----------
+
+conversionsDF.groupby("token_address", "to_address", "from_address").apply()agg(sum("value").when(col("to_address") == wallet_address).otherwise(-sum("value")))
 
 # COMMAND ----------
 
