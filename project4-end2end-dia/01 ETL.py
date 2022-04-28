@@ -120,11 +120,6 @@ display(Users_Table)
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC use g09_db;
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## Wallet Table
 # MAGIC - rows =  users
@@ -137,7 +132,8 @@ display(Users_Table)
 
 # COMMAND ----------
 
-Users_Table.printSchema()
+timestampDF = blocks.withColumn("timestamp", to_date(col("timestamp").cast("timestamp")))
+display(timestampDF)
 
 # COMMAND ----------
 
@@ -156,57 +152,12 @@ super_amazing_table = (timestampDF.join(erc20_token_transfers, timestampDF.numbe
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC from_address
-
-# COMMAND ----------
-
-timestampDF = blocks.withColumn("timestamp", to_date(col("timestamp").cast("timestamp")))
-display(timestampDF)
-
-# COMMAND ----------
-
-conversionsDF = (timestampDF.join(erc20_token_transfers, timestampDF.number == erc20_token_transfers.block_number, "inner")
-                            .select("to_address", "from_address", "token_address", "value")
-                            .join(Tokens_Table_erc20, Tokens_Table_erc20.)
-                            .filter((col("timestamp") < start_date) & ((col("to_address") == wallet_address) | (col("from_address") == wallet_address)))
-                 
-                )
-display(conversionsDF)
-
-# COMMAND ----------
-
-# join on tokens table
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC for each token, find the net value (to=+tokens, from=-tokens)
-
-# COMMAND ----------
-
-@pandas_udf("double", PandasUDFType.SCALAR)
-def sum_value(user_address_col, token_address_col, token_price_usd_col, Start_Date)
-
-# COMMAND ----------
-
-dbutils.fs.ls("/mnt/dscc202-datasets/misc/G09/")
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-conversionsDF.groupby("token_address", "to_address", "from_address").apply()agg(sum("value").when(col("to_address") == wallet_address).otherwise(-sum("value")))
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ***
-
-# COMMAND ----------
-
-
 
 # COMMAND ----------
 
