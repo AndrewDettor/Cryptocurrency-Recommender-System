@@ -41,9 +41,7 @@ spark.conf.set('start.date',start_date)
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC CREATE table IF NOT EXISTS erc20_token_transfers as
-# MAGIC (select * from ethereumetl.silver_contracts join ethereumetl.token_transfers on ethereumetl.silver_contracts.address = ethereumetl.token_transfers.token_address where ethereumetl.silver_contracts.is_erc20 = True);
+
 
 # COMMAND ----------
 
