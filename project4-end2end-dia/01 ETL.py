@@ -186,5 +186,9 @@ where time_date < "2022-01-01" and (from_address = "0xf02d7ee27ff9b2279e76a60978
 
 # COMMAND ----------
 
+
+
+# COMMAND ----------
+
 # Return Success
 dbutils.notebook.exit(json.dumps({"exit_code": "OK"}))
