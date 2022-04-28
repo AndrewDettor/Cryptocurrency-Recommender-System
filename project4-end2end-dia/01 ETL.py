@@ -36,12 +36,153 @@ spark.conf.set('start.date',start_date)
 
 # COMMAND ----------
 
+# MAGIC %python
+# MAGIC spark.conf.set("spark.sql.shuffle.partitions", 1905)
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC use ethereumetl;
+
+# COMMAND ----------
+
+blocks = spark.sql("select * from blocks")
+contracts = spark.sql("select * from contracts")
+logs = spark.sql("select * from logs")
+receipts = spark.sql("select * from receipts")
+token_transfers = spark.sql("select * from token_transfers")
+tokens = spark.sql("select * from tokens")
+token_prices_usd = spark.sql("select * from token_prices_usd")
+transactions = spark.sql("select * from transactions")
+silver_contracts = spark.sql("select * from silver_contracts")
+silver_erc20_token_transfers = spark.sql("select * from silver_erc20_token_transfers")
+
+# COMMAND ----------
+
 # MAGIC %md
-# MAGIC ## YOUR SOLUTION STARTS HERE...
+# MAGIC ***
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Tokens Table
+# MAGIC - from token_prices_usd
+# MAGIC   - name
+# MAGIC   - links
+# MAGIC   - image
+# MAGIC   - address
+# MAGIC   - price_usd
+# MAGIC   - make sure asset_platform_id = ethereum
+# MAGIC - from silver_contracts
+# MAGIC   - make sure is_erc20 = True
+# MAGIC     - join on address
+
+# COMMAND ----------
+
+from pyspark.sql.functions import col, lit, isnan, count, array_union, array_except, explode, collect_set, concat, array_distinct
+
+# COMMAND ----------
+
+Tokens_Table = (token_prices_usd.select(col("contract_address").alias("address"), col("name"), col("links"), col("image"), col("price_usd"))
+                .where(col("asset_platform_id") == lit("ethereum"))
+               )
+display(Tokens_Table)
+
+# COMMAND ----------
+
+display(Tokens_Table.select(isnan(col("price_usd"))))
+
+# COMMAND ----------
+
+Tokens_Table_erc20 = (Tokens_Table.join(silver_contracts, "address", "left")
+                            .filter(silver_contracts["is_erc20"] == lit(True))
+                            .select("address", "name", "links", "image", "price_usd", "is_erc20")
+                   )
+
+display(Tokens_Table_erc20)
+
+# COMMAND ----------
+
+group_path = "/mnt/dscc202-datasets/misc/G09"
+filename = "silver_erc20_tokens_table_adettor_g09_2020_01_01"
+Tokens_Table_erc20.write.format("delta").save(group_path + "/" + filename)
+
+# COMMAND ----------
+
+# dbutils.fs.rm("/mnt/dscc202-datasets/misc/G09/silver_erc20_tokens_table_adettor_g09", True)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Users Table
+# MAGIC - int index
+# MAGIC - from token_transfers
+# MAGIC   - set(all to_address) - set(all token_address)
+
+# COMMAND ----------
+
+Users_Table = (token_transfers.select(concat(col("to_address"), col("from_address")).alias("users"))
+                              .dropDuplicates()
+                              .filter(~col("users").contains(col("token_address")))
+              )
+
+# COMMAND ----------
+
+display(Users_Table)
+
+# COMMAND ----------
+
+group_path = "/mnt/dscc202-datasets/misc/G09"
+filename = "silver_users_table_adettor_g09_2020_01_01"
+Users_Table.write.format("delta").save(group_path + "/" + filename)
+
+# COMMAND ----------
+
+# dbutils.fs.rm("/mnt/dscc202-datasets/misc/G09/silver_users_table_adettor_g09/", True)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Wallet Table
+# MAGIC - rows =  users
+# MAGIC - cols = tokens
+# MAGIC - values = how much of that token (in USD) the user has in their wallet at Start_Date
+# MAGIC   - get all the token transfers a user has done
+# MAGIC   - convert token_amount into USD
+# MAGIC   - add the amount to the wallet if the user is in the to_address
+# MAGIC   - remove the amount from the wallet if the user is in the from_address
+
+# COMMAND ----------
+
+from pyspark.sql.functions import pandas_udf, PandasUDFType
+
+# COMMAND ----------
+
+@pandas_udf("double", PandasUDFType.GROUPED_AGG)
+def afkszdjfjksdfh(user_address_col, token_address_col, token_price_usd_col, Start_Date)
+
+# COMMAND ----------
+
+spark.udf.register("sql_vectorized_udf", vectorizedUDF)
+
+# COMMAND ----------
+
+CREATE VIEW IF NOT EXISTS blocks_date AS
+(SELECT *, FROM_UNIXTIME(timestamp,'y-M-d') AS time_date FROM blocks);
+
+# COMMAND ----------
+
+select * from blocks_date join token_transfers on blocks_date. number = token_transfers. block_number 
+where time_date < "2022-01-01" and (from_address = "0xf02d7ee27ff9b2279e76a60978bf8cca9b18a3ff" or to_address = "0xf02d7ee27ff9b2279e76a60978bf8cca9b18a3ff");
 
 # COMMAND ----------
 
 
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ***
 
 # COMMAND ----------
 
