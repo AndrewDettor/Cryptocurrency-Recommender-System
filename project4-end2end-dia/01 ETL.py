@@ -65,7 +65,7 @@ erc20_token_transfers = spark.sql("select * from g09_db.erc20_token_transfers")
 
 # COMMAND ----------
 
-from spark.sql.functions import *
+from pyspark.sql.functions import *
 
 # COMMAND ----------
 
@@ -91,12 +91,12 @@ display(Tokens_Table)
 
 # COMMAND ----------
 
-display(Tokens_Table.filter(isnan(col("price_usd"))))
+Tokens_Table = Tokens_Table.coalesce(1).withColumn("id", monotonically_increasing_id())
+display(Tokens_Table)
 
 # COMMAND ----------
 
-Tokens_Table = Tokens_Table.withColumn("id", monotonically_increasing_id())
-display(Tokens_Table)
+Tokens_Table.write.mode("overwrite").saveAsTable("g09_db.silver_token_table");
 
 # COMMAND ----------
 
@@ -115,8 +115,12 @@ display(Users_Table)
 
 # COMMAND ----------
 
-Users_Table = Users_Table.withColumn("id", monotonically_increasing_id())
+Users_Table = Users_Table.coalesce(1).withColumn("id", monotonically_increasing_id())
 display(Users_Table)
+
+# COMMAND ----------
+
+Users_Table.write.mode("overwrite").saveAsTable("g09_db.silver_user_table");
 
 # COMMAND ----------
 
@@ -137,22 +141,40 @@ display(timestampDF)
 
 # COMMAND ----------
 
-super_amazing_table = (timestampDF.join(erc20_token_transfers, timestampDF.number == erc20_token_transfers.block_number, "inner")
-                                  .filter((col("timestamp") < start_date)
-                                  .select("to_address", "from_address", "token_address", "value")    
-                                  .join(Tokens_Table_erc20, Tokens_Table_erc20.address = col("token_address"), "inner")
-                                  .filter(~col("from_address").contains(Users_Table.address))
-                                  .filter(~col("to_address").contains(Users_Table.address))   
-                                          
-                                          
-                            .filter((col("timestamp") < start_date) & ((col("to_address") == wallet_address) | (col("from_address") == wallet_address)))
-                 
-                )
+# MAGIC %md
+# MAGIC filter out all the erc20 token transfers before the start date
+
+# COMMAND ----------
+
+erc20_date_filtered_df = erc20_token_transfers.join(timestampDF,timestampDF.number == erc20_token_transfers.block_number,"inner").filter(col("timestamp") < start_date).select(col("from_address"), col("to_address"), col("token_address"), col("value"),col("timestamp"))
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC for each token, find the net value (to=+tokens, from=-tokens)
+
+# COMMAND ----------
+
+erc20_from_df = erc20_date_filtered_df.groupby(col("from_address"),col("token_address")).agg(sum((-1)*col("value")).alias("from_value"))
+display(erc20_from_df)
+
+# COMMAND ----------
+
+erc20_to_df = erc20_date_filtered_df.groupby(col("to_address"),col("token_address")).agg(sum(col("value")).alias("to_value"))
+display(erc20_to_df)
+
+# COMMAND ----------
+
+temp = erc20_to_df.union(erc20_from_df)
+display(temp)
+
+# COMMAND ----------
+
+wallet_token_value = temp.groupby(col("to_address"),col("token_address")).agg(sum(col("to_value")).alias("balance_value"))
+
+# COMMAND ----------
+
+wallet_token_value.write.mode("overwrite").saveAsTable("g09_db.silver_wallet_table_value");
 
 # COMMAND ----------
 
