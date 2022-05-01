@@ -87,12 +87,10 @@ Tokens_Table = (Tokens_Table.join(token_prices_usd, Tokens_Table.token_address =
                             .select("token_address", "name", "links", "image", "price_usd")
                                     
                )
-display(Tokens_Table)
 
 # COMMAND ----------
 
 Tokens_Table = Tokens_Table.coalesce(1).withColumn("id", monotonically_increasing_id())
-display(Tokens_Table)
 
 # COMMAND ----------
 
@@ -111,12 +109,12 @@ Tokens_Table.write.mode("overwrite").saveAsTable("g09_db.silver_token_table");
 Users_Table = (erc20_token_transfers.select(explode(array(col("from_address"), col("to_address"))).alias("users"))
                .distinct()
                )
-display(Users_Table)
+#display(Users_Table)
 
 # COMMAND ----------
 
 Users_Table = Users_Table.coalesce(1).withColumn("id", monotonically_increasing_id())
-display(Users_Table)
+#display(Users_Table)
 
 # COMMAND ----------
 
@@ -166,15 +164,35 @@ display(erc20_to_df)
 # COMMAND ----------
 
 temp = erc20_to_df.union(erc20_from_df)
-display(temp)
 
 # COMMAND ----------
 
 wallet_token_value = temp.groupby(col("to_address"),col("token_address")).agg(sum(col("to_value")).alias("balance_value"))
+display(wallet_token_value)
 
 # COMMAND ----------
 
-wallet_token_value.write.mode("overwrite").saveAsTable("g09_db.silver_wallet_table_value");
+wallet_token_price_usd = wallet_token_value.join(Tokens_Table, wallet_token_value.token_address == Tokens_Table.token_address,"inner").withColumn("balance_usd", col("price_usd")*col("balance_value")).select(col("to_address").alias("User_address"),Tokens_Table["token_address"],col("balance_usd").alias("balance"))
+display(wallet_token_price_usd)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Convert token and wallet address to corresponding id in Tokens_Table and Users_Table
+
+# COMMAND ----------
+
+silver_wallet_token_price_usd = wallet_token_price_usd.join(Tokens_Table, wallet_token_price_usd.token_address ==  Tokens_Table.token_address, "left").select(col("User_address"), col("id").alias("token_id"), col("balance"))
+display(silver_wallet_token_price_usd)
+
+# COMMAND ----------
+
+silver_token_balance = silver_wallet_token_price_usd.join(Users_Table, silver_wallet_token_price_usd.User_address ==  Users_Table.users, "left").select(col("id").alias("user_id"), col("token_id"), col("balance"))
+display(silver_token_balance)
+
+# COMMAND ----------
+
+silver_token_balance.write.mode("overwrite").saveAsTable("g09_db.silver_token_balance");
 
 # COMMAND ----------
 
