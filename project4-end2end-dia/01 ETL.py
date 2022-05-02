@@ -20,11 +20,25 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC # Setup
+
+# COMMAND ----------
+
 # MAGIC %run ./includes/utilities
 
 # COMMAND ----------
 
 # MAGIC %run ./includes/configuration
+
+# COMMAND ----------
+
+from pyspark.sql.functions import *
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Widget Values
 
 # COMMAND ----------
 
@@ -36,8 +50,38 @@ spark.conf.set('start.date',start_date)
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC # Partitioning
+
+# COMMAND ----------
+
 # MAGIC %python
 # MAGIC spark.conf.set("spark.sql.shuffle.partitions", 1905)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Make Notebook Idempotent
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Show Available Data Tables
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC show tables from ethereumetl
+
+# COMMAND ----------
+
+# MAGIC %sql 
+# MAGIC show tables from g09_db
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Ingest Bronze Data
 
 # COMMAND ----------
 
@@ -46,91 +90,84 @@ spark.conf.set('start.date',start_date)
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC CREATE table IF NOT EXISTS g09_db.erc20_token_transfers as
-# MAGIC (select * from ethereumetl.silver_contracts join ethereumetl.token_transfers on ethereumetl.silver_contracts.address = ethereumetl.token_transfers.token_address where ethereumetl.silver_contracts.is_erc20 = True);
-
-# COMMAND ----------
-
 blocks = spark.sql("select * from blocks")
-contracts = spark.sql("select * from contracts")
-logs = spark.sql("select * from logs")
-receipts = spark.sql("select * from receipts")
 token_transfers = spark.sql("select * from token_transfers")
-tokens = spark.sql("select * from tokens")
 token_prices_usd = spark.sql("select * from token_prices_usd")
-transactions = spark.sql("select * from transactions")
 silver_contracts = spark.sql("select * from silver_contracts")
-erc20_token_transfers = spark.sql("select * from g09_db.erc20_token_transfers")
-
-# COMMAND ----------
-
-from pyspark.sql.functions import *
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ***
+# MAGIC # Schema Validation
+
+# COMMAND ----------
+
+from pyspark.sql.types import _parse_datatype_string
+
+# COMMAND ----------
+
+blocks_schema = "number long, hash string, parent_hash string, nonce string, sha3_uncles string, logs_bloom string, transactions_root string, state_root string, receipts_root string, miner string, difficulty decimal(38,0), total_difficulty decimal(38,0), size long, extra_data string, gas_limit long, gas_used long, timestamp long, transaction_count long, start_block long, end_block long"
+ 
+assert blocks.schema == _parse_datatype_string(blocks_schema), "File not present in Silver Path"
+print("Assertion passed.")
+
+# COMMAND ----------
+
+token_transfers_schema = "token_address string, from_address string, to_address string, value decimal(38,0), transaction_hash string, log_index long, block_number long, start_block long, end_block long"
+
+assert token_transfers.schema == _parse_datatype_string(token_transfers_schema), "File not present in Silver Path"
+print("Assertion passed.")
+
+# COMMAND ----------
+
+token_prices_usd_schema = "id string, symbol string, name string, asset_platform_id string, description string, links string, image string, contract_address string, sentiment_votes_up_percentage double, sentiment_votes_down_percentage double, market_cap_rank double, coingecko_rank double, coingecko_score double, developer_score double, community_score double, liquidity_score double, public_interest_score double, price_usd double"
+
+assert token_prices_usd.schema == _parse_datatype_string(token_prices_usd_schema), "File not present in Silver Path"
+print("Assertion passed.")
+
+# COMMAND ----------
+
+silver_contracts_schema = "address string, bytecode string, is_erc20 string, is_erc721 string"
+
+assert silver_contracts.schema == _parse_datatype_string(silver_contracts_schema), "File not present in Silver Path"
+print("Assertion passed.")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Tokens Table
+# MAGIC # Cleaned Token Transfers Table
 
 # COMMAND ----------
 
-Tokens_Table = (erc20_token_transfers.select("token_address")
-                                    .distinct()
-               )
-
-Tokens_Table = (Tokens_Table.join(token_prices_usd, Tokens_Table.token_address == token_prices_usd.contract_address, "inner")
-                            .select("token_address", "name", "links", "image", "price_usd")
-                                    
-               )
-
-# COMMAND ----------
-
-Tokens_Table = Tokens_Table.coalesce(1).withColumn("id", monotonically_increasing_id())
-
-# COMMAND ----------
-
-Tokens_Table.write.mode("overwrite").saveAsTable("g09_db.silver_token_table");
+def transform_token_transfers(silver_contracts, token_transfers, blocks, start_date):
+    # Filter token transfers based on silver contracts to make sure we only consider ERC20 token transfers from the ethereum blockchain.
+    erc20_token_transfers = (silver_contracts.join(token_transfers, silver_contracts.address == token_transfers.token_address, "inner")
+                                         .where(col("is_erc20") == lit(True))
+                        )
+    # Change blocks' timestamp column to non-epoch time so it can be compatible with the Start_Date widget.
+    timestampDF = blocks.withColumn("timestamp", to_date(col("timestamp").cast("timestamp")))
+    # Filter out all ERC20 token transfers from before the start date.
+    erc20_date_filtered_df = (erc20_token_transfers.join(timestampDF, timestampDF.number == erc20_token_transfers.block_number, "inner")
+                                             .filter(col("timestamp") < start_date)
+                                             .select(col("from_address"), col("to_address"), col("token_address"), col("value"), col("timestamp"))
+                        )
+    return erc20_date_filtered_df
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Users Table
-# MAGIC - int index
-# MAGIC - from token_transfers
-# MAGIC   - set(all to_address) - set(all token_address)
+# MAGIC Filter token transfers based on silver contracts to make sure we only consider ERC20 token transfers from the ethereum blockchain.
 
 # COMMAND ----------
 
-Users_Table = (erc20_token_transfers.select(explode(array(col("from_address"), col("to_address"))).alias("users"))
-               .distinct()
-               )
-#display(Users_Table)
+erc20_token_transfers = (silver_contracts.join(token_transfers, silver_contracts.address == token_transfers.token_address, "inner")
+                                         .where(col("is_erc20") == lit(True))
+                        )
 
 # COMMAND ----------
 
-Users_Table = Users_Table.coalesce(1).withColumn("id", monotonically_increasing_id())
-#display(Users_Table)
-
-# COMMAND ----------
-
-Users_Table.write.mode("overwrite").saveAsTable("g09_db.silver_user_table");
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Wallet Table
-# MAGIC - rows =  users
-# MAGIC - cols = tokens
-# MAGIC - values = how much of that token (in USD) the user has in their wallet at Start_Date
-# MAGIC   - get all the token transfers a user has done
-# MAGIC   - convert token_amount into USD
-# MAGIC   - add the amount to the wallet if the user is in the to_address
-# MAGIC   - remove the amount from the wallet if the user is in the from_address
+# MAGIC %md 
+# MAGIC Change blocks' timestamp column to non-epoch time so it can be compatible with the Start_Date widget.
 
 # COMMAND ----------
 
@@ -140,26 +177,252 @@ display(timestampDF)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC filter out all the erc20 token transfers before the start date
+# MAGIC Filter out all ERC20 token transfers from before the start date.
 
 # COMMAND ----------
 
-erc20_date_filtered_df = erc20_token_transfers.join(timestampDF,timestampDF.number == erc20_token_transfers.block_number,"inner").filter(col("timestamp") < start_date).select(col("from_address"), col("to_address"), col("token_address"), col("value"),col("timestamp"))
+erc20_date_filtered_df = (erc20_token_transfers.join(timestampDF, timestampDF.number == erc20_token_transfers.block_number, "inner")
+                                             .filter(col("timestamp") < start_date)
+                                             .select(col("from_address"), col("to_address"), col("token_address"), col("value"), col("timestamp"))
+                        )
+
+# COMMAND ----------
+
+display(erc20_date_filtered_df)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC for each token, find the net value (to=+tokens, from=-tokens)
+# MAGIC Schema Validation
 
 # COMMAND ----------
 
-erc20_from_df = erc20_date_filtered_df.groupby(col("from_address"),col("token_address")).agg(sum((-1)*col("value")).alias("from_value"))
+erc20_date_filtered_df_schema = "token_address string, from_address string, to_address string, value decimal(38,0)"
+
+assert erc20_date_filtered_df.schema == _parse_datatype_string(erc20_date_filtered_df_schema), "File not present in Silver Path"
+print("Assertion passed.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Save to our group's database in the metastore.
+
+# COMMAND ----------
+
+# erc20_date_filtered_df.write.mode("overwrite").saveAsTable("g09_db.erc20_token_transfers_date_filtered");
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Tokens Table
+
+# COMMAND ----------
+
+def create_Tokens_Table(erc20_date_filtered_df, token_prices_usd):
+    # Get all the unique tokens from the cleaned token transfers table.
+    Tokens_Table = (erc20_date_filtered_df.select("token_address")
+                                    .distinct()
+               )
+    # Join with token_prices_usd to keep track of more information about the token for each transfer.
+    Tokens_Table = (Tokens_Table.join(token_prices_usd, Tokens_Table.token_address == token_prices_usd.contract_address, "inner")
+                            .select("token_address", "name", "links", "image", "price_usd")
+                                    
+               )
+    # Create an ID for each token (to be used in ALS modelling later).
+    Tokens_Table = Tokens_Table.coalesce(1).withColumn("id", monotonically_increasing_id())
+    
+    return Tokens_Table
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Get all the unique tokens from the cleaned token transfers table.
+
+# COMMAND ----------
+
+Tokens_Table = (erc20_date_filtered_df.select("token_address")
+                                    .distinct()
+               )
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Join with token_prices_usd to keep track of more information about the token for each transfer.
+
+# COMMAND ----------
+
+Tokens_Table = (Tokens_Table.join(token_prices_usd, Tokens_Table.token_address == token_prices_usd.contract_address, "inner")
+                            .select("token_address", "name", "links", "image", "price_usd")
+                                    
+               )
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Create an ID for each token (to be used in ALS modelling later).
+
+# COMMAND ----------
+
+Tokens_Table = Tokens_Table.coalesce(1).withColumn("id", monotonically_increasing_id())
+
+# COMMAND ----------
+
+display(Tokens_Table)
+
+# COMMAND ----------
+
+Tokens_Table = create_Tokens_Table(erc20_date_filtered_df, token_prices_usd)
+display(Tokens_Table)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Schema Validation
+
+# COMMAND ----------
+
+Tokens_Table_schema = "token_address string, name string, links string, image string, price_usd double, id bigint"
+
+assert Tokens_Table.schema == _parse_datatype_string(Tokens_Table_schema), "File not present in Silver Path"
+print("Assertion passed.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Save to our group's database in the metastore.
+
+# COMMAND ----------
+
+# Tokens_Table.write.mode("overwrite").saveAsTable("g09_db.silver_token_table");
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Users Table
+
+# COMMAND ----------
+
+def create_Users_Table(erc20_date_filtered_df):
+    # Get all unique users from all transactions by combining the from_address and to_address columns and removing duplicates.
+    Users_Table = (erc20_date_filtered_df.select(explode(array(col("from_address"), col("to_address"))).alias("users"))
+                                      .distinct()
+               )
+    # Create an ID for each user (to be used in ALS modelling later).
+    Users_Table = (Users_Table.coalesce(1)
+                          .withColumn("id", monotonically_increasing_id())
+              )
+    
+    return Users_Table
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Get all unique users from all transactions by combining the from_address and to_address columns and removing duplicates.
+
+# COMMAND ----------
+
+Users_Table = (erc20_date_filtered_df.select(explode(array(col("from_address"), col("to_address"))).alias("users"))
+                                      .distinct()
+               )
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Create an ID for each user (to be used in ALS modelling later).
+
+# COMMAND ----------
+
+Users_Table = (Users_Table.coalesce(1)
+                          .withColumn("id", monotonically_increasing_id())
+              )
+
+# COMMAND ----------
+
+display(Users_Table)
+
+# COMMAND ----------
+
+Users_Table = create_Users_Table(erc20_date_filtered_df)
+display(Users_Table)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Schema Validation
+
+# COMMAND ----------
+
+Users_Table_schema = "users string, id bigint"
+
+assert Users_Table.schema == _parse_datatype_string(Users_Table_schema), "File not present in Silver Path"
+print("Assertion passed.")
+
+# COMMAND ----------
+
+# MAGIC %md 
+# MAGIC Save to our group's database in the metastore.
+
+# COMMAND ----------
+
+# Users_Table.write.mode("overwrite").saveAsTable("g09_db.silver_user_table");
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Wallet Table
+
+# COMMAND ----------
+
+def create_Wallet_Table(erc20_date_filtered_df, Tokens_Table, Users_Table):
+    # For each token for each user, find the net balance in their wallet.
+    erc20_from_df = (erc20_date_filtered_df.groupby(col("from_address"),col("token_address"))
+                                       .agg(sum((-1)*col("value")).alias("from_value"))
+                )
+    erc20_to_df = (erc20_date_filtered_df.groupby(col("to_address"),col("token_address"))
+                                     .agg(sum(col("value")).alias("to_value"))
+              )
+    # Net balance = tokens user has gotten - tokens user has given away
+    temp = erc20_to_df.union(erc20_from_df)
+    wallet_token_value = (temp.groupby(col("to_address"),col("token_address"))
+                          .agg(sum(col("to_value")).alias("balance_value"))
+                     )
+    # Change the value for each token to USD, so they are all comparable.
+    wallet_token_price_usd = (wallet_token_value.join(Tokens_Table, wallet_token_value.token_address == Tokens_Table.token_address, "inner")
+                                                .withColumn("balance_usd", col("price_usd")*col("balance_value"))
+                                                .select(col("to_address").alias("User_address"), Tokens_Table["token_address"], col("balance_usd").alias("balance"))
+                             )
+    # Convert token and wallet address to corresponding id's in Tokens_Table and Users_Table
+    silver_wallet_token_price_usd = (wallet_token_price_usd.join(Tokens_Table, wallet_token_price_usd.token_address ==  Tokens_Table.token_address, "left")
+                                                       .select(col("User_address"), col("id").alias("token_id"), col("balance"))
+                                )
+    silver_token_balance = (silver_wallet_token_price_usd.join(Users_Table, silver_wallet_token_price_usd.User_address ==  Users_Table.users, "left")
+                                                     .select(col("id").alias("user_id"), col("token_id"), col("balance"))
+                       )
+    return silver_token_balance
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC For each token for each user, find the net balance in their wallet.
+
+# COMMAND ----------
+
+erc20_from_df = (erc20_date_filtered_df.groupby(col("from_address"),col("token_address"))
+                                       .agg(sum((-1)*col("value")).alias("from_value"))
+                )
 display(erc20_from_df)
 
 # COMMAND ----------
 
-erc20_to_df = erc20_date_filtered_df.groupby(col("to_address"),col("token_address")).agg(sum(col("value")).alias("to_value"))
+erc20_to_df = (erc20_date_filtered_df.groupby(col("to_address"),col("token_address"))
+                                     .agg(sum(col("value")).alias("to_value"))
+              )
 display(erc20_to_df)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Net balance = tokens user has gotten - tokens user has given away
 
 # COMMAND ----------
 
@@ -167,39 +430,75 @@ temp = erc20_to_df.union(erc20_from_df)
 
 # COMMAND ----------
 
-wallet_token_value = temp.groupby(col("to_address"),col("token_address")).agg(sum(col("to_value")).alias("balance_value"))
+wallet_token_value = (temp.groupby(col("to_address"),col("token_address"))
+                          .agg(sum(col("to_value")).alias("balance_value"))
+                     )
 display(wallet_token_value)
 
 # COMMAND ----------
 
-wallet_token_price_usd = wallet_token_value.join(Tokens_Table, wallet_token_value.token_address == Tokens_Table.token_address,"inner").withColumn("balance_usd", col("price_usd")*col("balance_value")).select(col("to_address").alias("User_address"),Tokens_Table["token_address"],col("balance_usd").alias("balance"))
+# MAGIC %md
+# MAGIC Change the value for each token to USD, so they are all comparable.
+
+# COMMAND ----------
+
+wallet_token_price_usd = (wallet_token_value.join(Tokens_Table, wallet_token_value.token_address == Tokens_Table.token_address, "inner")
+                                             .withColumn("balance_usd", col("price_usd")*col("balance_value"))
+                                             .select(col("to_address").alias("User_address"), Tokens_Table["token_address"], col("balance_usd").alias("balance"))
+                         )
 display(wallet_token_price_usd)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Convert token and wallet address to corresponding id in Tokens_Table and Users_Table
+# MAGIC Convert token and wallet address to corresponding id's in Tokens_Table and Users_Table
 
 # COMMAND ----------
 
-silver_wallet_token_price_usd = wallet_token_price_usd.join(Tokens_Table, wallet_token_price_usd.token_address ==  Tokens_Table.token_address, "left").select(col("User_address"), col("id").alias("token_id"), col("balance"))
+silver_wallet_token_price_usd = (wallet_token_price_usd.join(Tokens_Table, wallet_token_price_usd.token_address ==  Tokens_Table.token_address, "left")
+                                                       .select(col("User_address"), col("id").alias("token_id"), col("balance"))
+                                )
 display(silver_wallet_token_price_usd)
 
 # COMMAND ----------
 
-silver_token_balance = silver_wallet_token_price_usd.join(Users_Table, silver_wallet_token_price_usd.User_address ==  Users_Table.users, "left").select(col("id").alias("user_id"), col("token_id"), col("balance"))
+silver_token_balance = (silver_wallet_token_price_usd.join(Users_Table, silver_wallet_token_price_usd.User_address ==  Users_Table.users, "left")
+                                                     .select(col("id").alias("user_id"), col("token_id"), col("balance"))
+                       )
 display(silver_token_balance)
 
 # COMMAND ----------
 
-silver_token_balance.write.mode("overwrite").saveAsTable("g09_db.silver_token_balance");
+silver_token_balance = create_Wallet_Table(erc20_date_filtered_df, Tokens_Table, Users_Table)
+display(silver_token_balance)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ***
+# MAGIC Schema Validation
+
+# COMMAND ----------
+
+silver_token_balance_schema = "user_id bigint, token_id bigint, balance double"
+
+assert silver_token_balance.schema == _parse_datatype_string(silver_token_balance_schema), "File not present in Silver Path"
+print("Assertion passed.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Save to our group's database in the metastore.
+
+# COMMAND ----------
+
+# silver_token_balance.write.mode("overwrite").saveAsTable("g09_db.silver_token_balance");
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Exit Notebook
 
 # COMMAND ----------
 
 # Return Success
-dbutils.notebook.exit(json.dumps({"exit_code": "OK"}))
+# dbutils.notebook.exit(json.dumps({"exit_code": "OK"}))
