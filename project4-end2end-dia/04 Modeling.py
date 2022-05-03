@@ -28,6 +28,201 @@ print(wallet_address,start_date)
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC # Pipeline
+
+# COMMAND ----------
+
+# import libraries
+from pyspark.sql.types import *
+from pyspark.sql import functions as F
+
+# COMMAND ----------
+
+# load the silver delta tables
+token_balance_df = spark.sql("select * from g09_db.silver_token_balance")
+token_df = spark.sql("select * from g09_db.silver_token_table")
+user_df = spark.sql("select * from g09_db.silver_user_table")
+
+# COMMAND ----------
+
+# cache
+token_balance_df.cache()
+token_balance_df.printSchema()
+token_balance_df.show(5)
+ 
+token_df.cache()
+token_df.printSchema()
+token_df.show(5)
+ 
+user_df.cache()
+user_df.printSchema()
+user_df.show(5)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Data Preprocessing
+
+# COMMAND ----------
+
+# Normalize
+#max_b, min_b = token_balance_df.select(max("balance"), min("balance")).first()
+mean_b, std_b = token_balance_df.select(mean("balance"), stddev("balance")).first()
+#token_balance_df_s = token_balance_df.withColumn("balance_s", ((2000*(col("balance")-min_b))/(max_b-min_b)-1000))
+token_balance_df_s = token_balance_df.withColumn("balance", (col("balance") - mean_b) / std_b)
+display(token_balance_df_s)
+
+# COMMAND ----------
+
+# test_balance = token_balance_df_s.head(10000)
+# test_balance_df = spark.createDataFrame(test_balance)
+# display(test_balance_df)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Model
+
+# COMMAND ----------
+
+from pyspark.ml.recommendation import ALS
+from pyspark.ml.evaluation import RegressionEvaluator
+from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
+from mlflow.types.schema import Schema, ColSpec
+from mlflow.models.signature import ModelSignature
+import numpy as np
+
+# COMMAND ----------
+
+# 60% for training, 20% for validation, and 20% for testing
+seed = 29
+(split60_df, split20a_df, split20b_df) = token_balance_df_s.randomSplit([0.6, 0.2, 0.2], seed = seed)
+ 
+# cache the training, validation, and test data
+training_df = split60_df.cache()
+validation_df = split20a_df.cache()
+test_df = split20b_df.cache()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Model Parameter Initialization
+
+# COMMAND ----------
+
+# Initiate ALS learner
+als = ALS()
+ 
+# Set the parameters for the method
+als.setSeed(seed).setItemCol("token_id").setRatingCol("balance").setUserCol("user_id").setColdStartStrategy("drop")
+ 
+# Evaluation metric for the test dataset
+reg_eval = RegressionEvaluator(predictionCol="prediction", labelCol="balance", metricName="rmse")
+ 
+# Set up grid search parameters and values to find out the best hyperparameters
+grid = ParamGridBuilder().addGrid(als.maxIter, [5, 10]).addGrid(als.regParam, [0.25, 0.5, 0.75]).addGrid(als.rank, [4, 8, 12, 16]).build()
+ 
+# Cross validator: created using the reg_eval and grid defined above
+cv = CrossValidator(estimator=als, evaluator=reg_eval, estimatorParamMaps=grid, numFolds=3)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Model Training
+
+# COMMAND ----------
+
+# setup the schema for the model
+input_schema = Schema([
+    ColSpec("long", "token_id"), 
+    ColSpec("long", "user_id"),])
+output_schema = Schema([ColSpec("float")])
+signature = ModelSignature(inputs=input_schema, outputs=output_schema)
+    
+with mlflow.start_run(run_name="ALS-token-run") as run:
+    mlflow.set_tags({"group": 'G09', "class": "DSCC202-402"})
+    # mlflow.log_params({"user_rating_training_data_version": self.training_data_version,"minimum_play_count":self.minPlayCount})
+ 
+    # Run the cross validation on the training dataset. The cv.fit() call returns the best model it found.
+    cvModel = cv.fit(training_df)
+    best_model = cvModel.bestModel
+    # print(cvModel.getEstimatorParamMaps()[np.argmax(cvModel.avgMetrics)])
+    mlflow.log_param("Rank", best_model._java_obj.parent().getRank())
+    mlflow.log_param("MaxIter", best_model._java_obj.parent().getMaxIter())
+    mlflow.log_param("RegParam", best_model._java_obj.parent().getRegParam())
+    
+    # validation_metric = reg_eval.evaluate(cvModel.transform(validation_df))
+    # Run the model to create a prediction. Predict against the validation_df.
+    predict_df = cvModel.transform(validation_df)
+    
+    # Remove NaN values from prediction
+    predicted_tokens_df = predict_df.filter(predict_df.prediction != float('nan'))
+    predicted_tokens_df = predicted_tokens_df.withColumn("prediction", F.abs(predicted_tokens_df["prediction"]))
+    
+    # Evaluate the best model's performance on the validation dataset and log the result.
+    validation_metric = reg_eval.evaluate(predicted_tokens_df)
+    mlflow.log_metric('test_' + reg_eval.getMetricName(), validation_metric) 
+    
+    # Log the best model.
+    mlflow.spark.log_model(spark_model=cvModel.bestModel, signature = signature,artifact_path='als-model', registered_model_name="G09_test")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Remove the trained model path
+
+# COMMAND ----------
+
+butils.fs.rm("dbfs:/mnt/dscc202-datasets/misc/G09/token_model", True)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # save model to G09 path
+
+# COMMAND ----------
+
+dbutils.fs.mkdirs("dbfs:/mnt/dscc202-datasets/misc/G09/token_model")
+
+# COMMAND ----------
+
+mlflow.spark.save_model(best_model, "/dbfs/mnt/dscc202-datasets/misc/G09/token_model")
+
+# COMMAND ----------
+
+ALS_model_loaded = mlflow.spark.load_model("dbfs:/mnt/dscc202-datasets/misc/G09/token_model")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Token recommendation
+
+# COMMAND ----------
+
+UserID = 50065823
+used_tokens = token_balance_df.filter(token_balance_df.user_id == UserID).join(token_df, token_df.id == token_balance_df.token_id).select('user_id', 'token_id', 'token_address', 'name', 'image')
+display(used_tokens)
+ 
+used_tokens_list = []
+for token in used_tokens.collect():
+    used_tokens_list.append(token['token_id'])
+print(used_tokens_list)
+ 
+print('Tokens user has transfered before:')
+used_tokens.select('token_address', 'name').show()
+ 
+# generate dataframe of transfered tokens
+untransfered_tokens = token_balance_df.filter(~token_balance_df['token_id'].isin(used_tokens_list)).select('token_id').withColumn('user_id', F.lit(UserID)).distinct()
+# display(untransfered_tokens)
+# print(type(untransfered_tokens))
+predicted_likes = ALS_model_loaded.transform(untransfered_tokens)
+# remove NaNs
+predicted_likes = predicted_likes.filter(predicted_likes['prediction'] != float('nan'))
+display(predicted_likes)
+# print output
+print('Predicted Tokens:')
+predicted_likes.join(token_df, token_df.id == predicted_likes.token_id).select(predicted_likes.user_id,'token_id', 'token_address', 'name','prediction').distinct().orderBy('prediction', ascending = False).show(10)
 
 
 # COMMAND ----------

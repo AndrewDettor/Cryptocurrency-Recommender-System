@@ -27,6 +27,40 @@ print(wallet_address,start_date)
 
 # COMMAND ----------
 
+# FIXME!!!!!!!!!! Need to change "token_df" to the actual recommendation result df
+token_df = spark.sql("select * from g09_db.silver_token_table limit(3)")
+display(token_df)
+
+# COMMAND ----------
+
+html_code = """
+<style>
+    td{
+        padding: 20px;
+    }
+    table{
+        border-collapse: collapse;
+    }
+    a{
+        text-decoration: none;
+    }
+</style>
+<h1>Recommend Tokens for user address:</h1>
+"""
+html_code += "<p>"+ wallet_address + "</p>\n"
+html_code += """
+<table>
+<tr><td><b>Logo</b></td><td><b>Name</b></td><td><b>Link</b></td></tr>
+"""
+ 
+for row in token_df.collect():  
+    logo = row["image"]
+    name = row["name"]
+    link = row["links"]
+    html_row = "<tr><td><img src='" + logo + "' alt='token logo'></td><td>" + name + "</td><td>" + "<a href='" + link + "'><img src='https://www.clipartkey.com/mpngs/m/84-840903_transparent-grass-tuft-clipart-weaknesses-icon.png' alt='link image' width='35px' height='35px'></a></td></tr>\n"
+    html_code+=html_row
+ 
+displayHTML(html_code)
 
 
 # COMMAND ----------
