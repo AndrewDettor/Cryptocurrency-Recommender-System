@@ -144,9 +144,9 @@ print("Assertion passed.")
 
 # COMMAND ----------
 
-erc20_token_transfers = (silver_contracts.join(token_transfers, silver_contracts.address == token_transfers.token_address, "inner")
-                                         .where(col("is_erc20") == lit(True))
-                        )
+# MAGIC %sql
+# MAGIC CREATE table IF NOT EXISTS g09_db.erc20_token_transfers as
+# MAGIC (select * from ethereumetl.silver_contracts join ethereumetl.token_transfers on ethereumetl.silver_contracts.address = ethereumetl.token_transfers.token_address where ethereumetl.silver_contracts.is_erc20 = True);
 
 # COMMAND ----------
 
@@ -218,7 +218,7 @@ Tokens_Table = (erc20_date_filtered_df.select("token_address")
 # COMMAND ----------
 
 Tokens_Table = (Tokens_Table.join(token_prices_usd, Tokens_Table.token_address == token_prices_usd.contract_address, "inner")
-                            .select("token_address", "name", "links", "image", "price_usd")
+                            .select("token_address", "name", "links", "image", "price_usd").distinct()
                                     
                )
 
