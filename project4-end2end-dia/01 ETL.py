@@ -189,7 +189,10 @@ print("Assertion passed.")
 # COMMAND ----------
 
 erc20_date_filtered_df.write.mode("overwrite").partitionBy("token_address").saveAsTable("g09_db.erc20_token_transfers_date_filtered_test_adettor")
-display(spark.sql("OPTIMIZE erc20_token_transfers_date_filtered_test_adettor ZORDER BY (to_address)"))
+
+# COMMAND ----------
+
+display(spark.sql("OPTIMIZE g09_db.erc20_token_transfers_date_filtered_test_adettor ZORDER BY (to_address)"))
 
 # COMMAND ----------
 
@@ -248,7 +251,7 @@ print("Assertion passed.")
 # COMMAND ----------
 
 Tokens_Table.write.mode("overwrite").partitionBy("token_address").saveAsTable("g09_db.silver_token_table_test_adettor")
-display(spark.sql("OPTIMIZE silver_token_table_test_adettor ZORDER BY (price_usd)"))
+display(spark.sql("OPTIMIZE g09_db.silver_token_table_test_adettor ZORDER BY (price_usd)"))
 
 # COMMAND ----------
 
@@ -297,7 +300,7 @@ print("Assertion passed.")
 # COMMAND ----------
 
 Users_Table.write.mode("overwrite").partitionBy("users").saveAsTable("g09_db.silver_user_table_test_adettor")
-display(spark.sql("OPTIMIZE silver_user_table_test_adettor ZORDER BY (id)"))
+display(spark.sql("OPTIMIZE g09_db.silver_user_table_test_adettor ZORDER BY (id)"))
 
 # COMMAND ----------
 
@@ -390,7 +393,7 @@ print("Assertion passed.")
 # COMMAND ----------
 
 silver_token_balance.write.mode("overwrite").partitionBy("token_id").saveAsTable("g09_db.silver_token_balance_test_adettor")
-display(spark.sql("OPTIMIZE silver_token_balance_test_adettor ZORDER BY (user_id)"))
+display(spark.sql("OPTIMIZE g09_db.silver_token_balance_test_adettor ZORDER BY (user_id)"))
 
 # COMMAND ----------
 
@@ -400,4 +403,4 @@ display(spark.sql("OPTIMIZE silver_token_balance_test_adettor ZORDER BY (user_id
 # COMMAND ----------
 
 # Return Success
-# dbutils.notebook.exit(json.dumps({"exit_code": "OK"}))
+dbutils.notebook.exit(json.dumps({"exit_code": "OK"}))
