@@ -21,7 +21,139 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC First ERC20 - January 27, 2016
+# MAGIC # Pipeline: Bronze to Silver
+# MAGIC ## 1. Bronze Data
+# MAGIC    - Source: ethereumetl (in SQL Metastore)
+# MAGIC        - save as DataFrames using spark.sql
+# MAGIC    - Tables:
+# MAGIC        - blocks (DataFrame)
+# MAGIC             - number:long
+# MAGIC             - hash:string
+# MAGIC             - parent_hash:string
+# MAGIC             - nonce:string
+# MAGIC             - sha3_uncles:string
+# MAGIC             - logs_bloom:string
+# MAGIC             - transactions_root:string
+# MAGIC             - state_root:string
+# MAGIC             - receipts_root:string
+# MAGIC             - miner:string
+# MAGIC             - difficulty:decimal(38,0)
+# MAGIC             - total_difficulty:decimal(38,0)
+# MAGIC             - size:long
+# MAGIC             - extra_data:string
+# MAGIC             - gas_limit:long
+# MAGIC             - gas_used:long
+# MAGIC             - timestamp:long
+# MAGIC             - transaction_count:long
+# MAGIC             - start_block:long
+# MAGIC             - end_block:long
+# MAGIC        - token_transfers (DataFrame)
+# MAGIC             - token_address:string
+# MAGIC             - from_address:string
+# MAGIC             - to_address:string
+# MAGIC             - value:decimal(38,0)
+# MAGIC             - transaction_hash:string
+# MAGIC             - log_index:long
+# MAGIC             - block_number:long
+# MAGIC             - start_block:long
+# MAGIC             - end_block:long
+# MAGIC        - token_prices_usd (DataFrame)
+# MAGIC             - id:string
+# MAGIC             - symbol:string
+# MAGIC             - name:string
+# MAGIC             - asset_platform_id:string
+# MAGIC             - description:string
+# MAGIC             - links:string
+# MAGIC             - image:string
+# MAGIC             - contract_address:string
+# MAGIC             - sentiment_votes_up_percentage:double
+# MAGIC             - sentiment_votes_down_percentage:double
+# MAGIC             - market_cap_rank:double
+# MAGIC             - coingecko_rank:double
+# MAGIC             - coingecko_score:double
+# MAGIC             - developer_score:double
+# MAGIC             - community_score:double
+# MAGIC             - liquidity_score:double
+# MAGIC             - public_interest_score:double
+# MAGIC             - price_usd:double
+# MAGIC        - silver_contracts (DataFrame)
+# MAGIC             - address:string
+# MAGIC             - bytecode:string
+# MAGIC             - is_erc20:string
+# MAGIC             - is_erc721:string
+
+# COMMAND ----------
+
+# MAGIC %md 
+# MAGIC ## 2. Create erc20_token_transfers (in SQL Metastore)
+# MAGIC    - use SQL to join silver_contracts with token_transfers on address where is_erc20 = True
+# MAGIC    - Schema:
+# MAGIC        - token_address:string
+# MAGIC        - from_address:string
+# MAGIC        - to_address:string
+# MAGIC        - value:decimal(38,0)
+# MAGIC        - transaction_hash:string
+# MAGIC        - log_index:long
+# MAGIC        - block_number:long
+# MAGIC        - start_block:long
+# MAGIC        - end_block:long
+# MAGIC        - address:string
+# MAGIC        - bytecode:string
+# MAGIC        - is_erc20:string
+# MAGIC        - is_erc721:string
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 3. Create erc20_date_filtered_df (DataFrame)
+# MAGIC    - join erc20_token_transfers with blocks to filter transfers from before Start_Date
+# MAGIC    - Schema:
+# MAGIC        - from_address:string
+# MAGIC        - to_address:string
+# MAGIC        - token_address:string
+# MAGIC        - value:decimal(38,0)
+# MAGIC        - timestamp:date
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 4. Create Tokens_Table (DataFrame)
+# MAGIC    - get distinct token addresses from erc20_date_filtered_df
+# MAGIC    - join with token_prices_usd to keep track of all the information we need for each token
+# MAGIC    - create a unique integer id for each token
+# MAGIC    - save to SQL Metastore as silver_token_table
+# MAGIC    - Schema:
+# MAGIC        - token_address:string
+# MAGIC        - name:string
+# MAGIC        - links:string
+# MAGIC        - image:string
+# MAGIC        - price_usd:double
+# MAGIC        - id:long
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 5. Create Users_Table (DataFrame)
+# MAGIC    - combine from_address and to_address from erc20_date_filtered_df into one column and remove duplicate addresses
+# MAGIC    - create a unique integer id for each user
+# MAGIC    - save to SQL Metastore as silver_user_table
+# MAGIC    - Schema:
+# MAGIC        - users:string
+# MAGIC        - id:long
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 6. Create silver_token_balance (DataFrame)
+# MAGIC    - for each user for each token, find how much they've sent and how much they've received
+# MAGIC    - change value into USD by joining with Tokens_Table
+# MAGIC    - change token_address into its integer id by joining with Tokens_Table
+# MAGIC    - change user_address into its integer id by joining with Users_Table
+# MAGIC    - save to SQL Metastore as silver_token_balance
+# MAGIC    - Schema:
+# MAGIC        - user_id:long
+# MAGIC        - token_id:long
+# MAGIC        - balance:double
 
 # COMMAND ----------
 
@@ -150,6 +282,10 @@ print("Assertion passed.")
 
 # COMMAND ----------
 
+erc20_token_transfers = spark.sql("select * from g09_db.erc20_token_transfers")
+
+# COMMAND ----------
+
 # MAGIC %md 
 # MAGIC Change blocks' timestamp column to non-epoch time so it can be compatible with the Start_Date widget.
 
@@ -233,6 +369,10 @@ Tokens_Table = Tokens_Table.coalesce(1).withColumn("id", monotonically_increasin
 
 # COMMAND ----------
 
+display(Tokens_Table)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC Schema Validation
 
@@ -279,6 +419,10 @@ Users_Table = (erc20_date_filtered_df.select(explode(array(col("from_address"), 
 Users_Table = (Users_Table.coalesce(1)
                           .withColumn("id", monotonically_increasing_id())
               )
+
+# COMMAND ----------
+
+display(Users_Table)
 
 # COMMAND ----------
 
@@ -335,6 +479,10 @@ temp = erc20_to_df.union(erc20_from_df)
 
 # COMMAND ----------
 
+display(temp)
+
+# COMMAND ----------
+
 wallet_token_value = (temp.groupby(col("to_address"),col("token_address"))
                           .agg(sum(col("to_value")).alias("balance_value"))
                           .select(col("to_address"), col("token_address").alias("token_address_wallet_df"), col("balance_value")) # renaming token address because AnalysisException: Column token_address#140 are ambiguous
@@ -351,6 +499,10 @@ wallet_token_price_usd = (wallet_token_value.join(Tokens_Table, wallet_token_val
                                              .withColumn("balance_usd", col("price_usd")*col("balance_value"))
                                              .select(col("to_address").alias("User_address"), col("token_address"), col("balance_usd").alias("balance"))
                          )
+
+# COMMAND ----------
+
+display(wallet_token_price_usd)
 
 # COMMAND ----------
 
