@@ -320,19 +320,6 @@ print("Assertion passed.")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Save to our group's database in the metastore.
-
-# COMMAND ----------
-
-erc20_date_filtered_df.write.mode("overwrite").partitionBy("token_address").saveAsTable("g09_db.erc20_token_transfers_date_filtered_test_adettor")
-
-# COMMAND ----------
-
-display(spark.sql("OPTIMIZE g09_db.erc20_token_transfers_date_filtered_test_adettor ZORDER BY (to_address)"))
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC # Tokens Table
 
 # COMMAND ----------
@@ -390,8 +377,8 @@ print("Assertion passed.")
 
 # COMMAND ----------
 
-Tokens_Table.write.mode("overwrite").partitionBy("token_address").saveAsTable("g09_db.silver_token_table_test_adettor")
-display(spark.sql("OPTIMIZE g09_db.silver_token_table_test_adettor ZORDER BY (price_usd)"))
+Tokens_Table.write.mode("overwrite").partitionBy("token_address").saveAsTable("g09_db.silver_token_table")
+display(spark.sql("OPTIMIZE g09_db.silver_token_table ZORDER BY (price_usd)"))
 
 # COMMAND ----------
 
@@ -443,8 +430,8 @@ print("Assertion passed.")
 
 # COMMAND ----------
 
-Users_Table.write.mode("overwrite").partitionBy("users").saveAsTable("g09_db.silver_user_table_test_adettor")
-display(spark.sql("OPTIMIZE g09_db.silver_user_table_test_adettor ZORDER BY (id)"))
+Users_Table.write.mode("overwrite").partitionBy("users").saveAsTable("g09_db.silver_user_table")
+display(spark.sql("OPTIMIZE g09_db.silver_user_table ZORDER BY (id)"))
 
 # COMMAND ----------
 
@@ -544,8 +531,8 @@ print("Assertion passed.")
 
 # COMMAND ----------
 
-silver_token_balance.write.mode("overwrite").partitionBy("token_id").saveAsTable("g09_db.silver_token_balance_test_adettor")
-display(spark.sql("OPTIMIZE g09_db.silver_token_balance_test_adettor ZORDER BY (user_id)"))
+silver_token_balance.write.mode("overwrite").partitionBy("token_id").saveAsTable("g09_db.silver_token_balance")
+display(spark.sql("OPTIMIZE g09_db.silver_token_balance ZORDER BY (user_id)"))
 
 # COMMAND ----------
 
