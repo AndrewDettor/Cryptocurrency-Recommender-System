@@ -356,10 +356,6 @@ Tokens_Table = Tokens_Table.coalesce(1).withColumn("id", monotonically_increasin
 
 # COMMAND ----------
 
-display(Tokens_Table)
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC Schema Validation
 
@@ -406,10 +402,6 @@ Users_Table = (erc20_date_filtered_df.select(explode(array(col("from_address"), 
 Users_Table = (Users_Table.coalesce(1)
                           .withColumn("id", monotonically_increasing_id())
               )
-
-# COMMAND ----------
-
-display(Users_Table)
 
 # COMMAND ----------
 
@@ -489,10 +481,6 @@ wallet_token_price_usd = (wallet_token_value.join(Tokens_Table, wallet_token_val
 
 # COMMAND ----------
 
-display(wallet_token_price_usd)
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC Convert token and wallet address to corresponding id's in Tokens_Table and Users_Table
 
@@ -507,10 +495,6 @@ silver_wallet_token_price_usd = (wallet_token_price_usd.join(Tokens_Table, walle
 silver_token_balance = (silver_wallet_token_price_usd.join(Users_Table, silver_wallet_token_price_usd.User_address ==  Users_Table.users, "left")
                                                      .select(col("id").alias("user_id"), col("token_id"), col("balance"))
                        )
-
-# COMMAND ----------
-
- display(silver_token_balance)
 
 # COMMAND ----------
 
