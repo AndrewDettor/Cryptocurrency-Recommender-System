@@ -170,6 +170,21 @@ with mlflow.start_run(run_name="ALS-token-run") as run:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC # staging the model
+
+# COMMAND ----------
+
+from mlflow.tracking.client import MlflowClient
+import builtins as p
+client = MlflowClient()
+model_version_infos = client.search_model_versions(f"name = 'G09_test'")
+new_model_version = [model_version_info.version for model_version_info in model_version_infos]
+max_version = p.max(new_model_version)
+client.transition_model_version_stage(name="G09_test", version=max_version, stage="Staging",)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC # Remove the trained model path
 
 # COMMAND ----------
@@ -192,38 +207,6 @@ mlflow.spark.save_model(best_model, "/dbfs/mnt/dscc202-datasets/misc/G09/token_m
 # COMMAND ----------
 
 ALS_model_loaded = mlflow.spark.load_model("dbfs:/mnt/dscc202-datasets/misc/G09/token_model")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC # Token recommendation
-
-# COMMAND ----------
-
-UserID = 50065823
-used_tokens = token_balance_df.filter(token_balance_df.user_id == UserID).join(token_df, token_df.id == token_balance_df.token_id).select('user_id', 'token_id', 'token_address', 'name', 'image')
-display(used_tokens)
- 
-used_tokens_list = []
-for token in used_tokens.collect():
-    used_tokens_list.append(token['token_id'])
-print(used_tokens_list)
- 
-print('Tokens user has transfered before:')
-used_tokens.select('token_address', 'name').show()
- 
-# generate dataframe of transfered tokens
-untransfered_tokens = token_balance_df.filter(~token_balance_df['token_id'].isin(used_tokens_list)).select('token_id').withColumn('user_id', F.lit(UserID)).distinct()
-# display(untransfered_tokens)
-# print(type(untransfered_tokens))
-predicted_likes = ALS_model_loaded.transform(untransfered_tokens)
-# remove NaNs
-predicted_likes = predicted_likes.filter(predicted_likes['prediction'] != float('nan'))
-display(predicted_likes)
-# print output
-print('Predicted Tokens:')
-predicted_likes.join(token_df, token_df.id == predicted_likes.token_id).select(predicted_likes.user_id,'token_id', 'token_address', 'name','prediction').distinct().orderBy('prediction', ascending = False).show(10)
-
 
 # COMMAND ----------
 
