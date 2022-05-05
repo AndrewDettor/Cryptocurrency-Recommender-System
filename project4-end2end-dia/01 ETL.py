@@ -193,7 +193,7 @@ spark.conf.set('start.date',start_date)
 # COMMAND ----------
 
 # MAGIC %python
-# MAGIC spark.conf.set("spark.sql.shuffle.partitions", 1905)
+# MAGIC # spark.conf.set("spark.sql.shuffle.partitions", 1905)
 
 # COMMAND ----------
 
@@ -356,10 +356,6 @@ Tokens_Table = Tokens_Table.coalesce(1).withColumn("id", monotonically_increasin
 
 # COMMAND ----------
 
-display(Tokens_Table)
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC Schema Validation
 
@@ -377,7 +373,7 @@ print("Assertion passed.")
 
 # COMMAND ----------
 
-Tokens_Table.write.mode("overwrite").partitionBy("token_address").saveAsTable("g09_db.silver_token_table")
+Tokens_Table.repartition("token_address").write.mode("overwrite").saveAsTable("g09_db.silver_token_table")
 display(spark.sql("OPTIMIZE g09_db.silver_token_table ZORDER BY (price_usd)"))
 
 # COMMAND ----------
@@ -409,10 +405,6 @@ Users_Table = (Users_Table.coalesce(1)
 
 # COMMAND ----------
 
-display(Users_Table)
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC Schema Validation
 
@@ -430,7 +422,7 @@ print("Assertion passed.")
 
 # COMMAND ----------
 
-Users_Table.write.mode("overwrite").partitionBy("users").saveAsTable("g09_db.silver_user_table")
+Users_Table.repartition("users").write.mode("overwrite").saveAsTable("g09_db.silver_user_table")
 display(spark.sql("OPTIMIZE g09_db.silver_user_table ZORDER BY (id)"))
 
 # COMMAND ----------
@@ -466,10 +458,6 @@ temp = erc20_to_df.union(erc20_from_df)
 
 # COMMAND ----------
 
-display(temp)
-
-# COMMAND ----------
-
 wallet_token_value = (temp.groupby(col("to_address"),col("token_address"))
                           .agg(sum(col("to_value")).alias("balance_value"))
                           .select(col("to_address"), col("token_address").alias("token_address_wallet_df"), col("balance_value")) # renaming token address because AnalysisException: Column token_address#140 are ambiguous
@@ -486,10 +474,6 @@ wallet_token_price_usd = (wallet_token_value.join(Tokens_Table, wallet_token_val
                                              .withColumn("balance_usd", col("price_usd")*col("balance_value"))
                                              .select(col("to_address").alias("User_address"), col("token_address"), col("balance_usd").alias("balance"))
                          )
-
-# COMMAND ----------
-
-display(wallet_token_price_usd)
 
 # COMMAND ----------
 
@@ -510,10 +494,6 @@ silver_token_balance = (silver_wallet_token_price_usd.join(Users_Table, silver_w
 
 # COMMAND ----------
 
- display(silver_token_balance)
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC Schema Validation
 
@@ -531,7 +511,7 @@ print("Assertion passed.")
 
 # COMMAND ----------
 
-silver_token_balance.write.mode("overwrite").partitionBy("token_id").saveAsTable("g09_db.silver_token_balance")
+silver_token_balance.repartition("token_id").write.mode("overwrite").saveAsTable("g09_db.silver_token_balance")
 display(spark.sql("OPTIMIZE g09_db.silver_token_balance ZORDER BY (user_id)"))
 
 # COMMAND ----------
