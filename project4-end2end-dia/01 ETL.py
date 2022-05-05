@@ -193,7 +193,7 @@ spark.conf.set('start.date',start_date)
 # COMMAND ----------
 
 # MAGIC %python
-# MAGIC spark.conf.set("spark.sql.shuffle.partitions", 1905)
+# MAGIC # spark.conf.set("spark.sql.shuffle.partitions", 1905)
 
 # COMMAND ----------
 
@@ -373,7 +373,7 @@ print("Assertion passed.")
 
 # COMMAND ----------
 
-Tokens_Table.write.mode("overwrite").partitionBy("token_address").saveAsTable("g09_db.silver_token_table")
+Tokens_Table.repartition("token_address").write.mode("overwrite").saveAsTable("g09_db.silver_token_table")
 display(spark.sql("OPTIMIZE g09_db.silver_token_table ZORDER BY (price_usd)"))
 
 # COMMAND ----------
@@ -422,7 +422,7 @@ print("Assertion passed.")
 
 # COMMAND ----------
 
-Users_Table.write.mode("overwrite").partitionBy("users").saveAsTable("g09_db.silver_user_table")
+Users_Table.repartition("users").write.mode("overwrite").saveAsTable("g09_db.silver_user_table")
 display(spark.sql("OPTIMIZE g09_db.silver_user_table ZORDER BY (id)"))
 
 # COMMAND ----------
@@ -455,10 +455,6 @@ erc20_to_df = (erc20_date_filtered_df.groupby(col("to_address"),col("token_addre
 # COMMAND ----------
 
 temp = erc20_to_df.union(erc20_from_df)
-
-# COMMAND ----------
-
-display(temp)
 
 # COMMAND ----------
 
@@ -515,7 +511,7 @@ print("Assertion passed.")
 
 # COMMAND ----------
 
-silver_token_balance.write.mode("overwrite").partitionBy("token_id").saveAsTable("g09_db.silver_token_balance")
+silver_token_balance.repartition("token_id").write.mode("overwrite").saveAsTable("g09_db.silver_token_balance")
 display(spark.sql("OPTIMIZE g09_db.silver_token_balance ZORDER BY (user_id)"))
 
 # COMMAND ----------
