@@ -35,9 +35,7 @@ print(wallet_address,start_date)
 # MAGIC %sql
 # MAGIC -- 10 popular tokens based on # of transactions: used as default token recommendations
 # MAGIC CREATE table IF NOT EXISTS g09_db.popular10_tokens as
-# MAGIC (select image, links, name from (((select g09_db.silver_token_table.token_address, count(*) as transaction_num from g09_db.silver_token_table inner join g09_db.erc20_token_transfers on g09_db.silver_token_table.token_address = g09_db.erc20_token_transfers.token_address group by g09_db.silver_token_table.token_address order by transaction_num desc limit(10)) as top10) inner join g09_db.silver_token_table on top10.token_address=g09_db.silver_token_table.token_address));# FIXME!!!!!!!!!! Need to change "token_df" to the actual recommendation result df
-# MAGIC token_df = spark.sql("select * from g09_db.silver_token_table limit(3)")
-# MAGIC display(token_df)
+# MAGIC (select image, links, name from (((select g09_db.silver_token_table.token_address, count(*) as transaction_num from g09_db.silver_token_table inner join g09_db.erc20_token_transfers on g09_db.silver_token_table.token_address = g09_db.erc20_token_transfers.token_address group by g09_db.silver_token_table.token_address order by transaction_num desc limit(10)) as top10) inner join g09_db.silver_token_table on top10.token_address=g09_db.silver_token_table.token_address));
 
 # COMMAND ----------
 
