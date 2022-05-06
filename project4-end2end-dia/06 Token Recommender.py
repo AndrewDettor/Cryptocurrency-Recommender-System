@@ -81,8 +81,28 @@ htmlCode += "<p>"+ wallet_address + "</p>\n"
  
 if(UserID_query.count()==0): #handle the case where no such user id in the database
     htmlCode += """
-    <p>No such user in the database, please check your input</p>
+    <style>
+            td{
+                padding: 20px;
+            }
+            table{
+                border-collapse: collapse;
+            }
+            a{
+                text-decoration: none;
+            }
+    </style>
+    <p>No such user in the database, please check your input.</p>
+    <p>10 popular tokens:</p>  
+    <table>
+    <tr><td><b>Logo</b></td><td><b>Name</b></td><td><b>Link</b></td></tr>
     """
+    for row in pop10_df.collect():  
+            logo = row["image"]
+            name = row["name"]
+            link = row["links"]
+            html_row = "<tr><td><img src='" + logo + "' alt='token logo'></td><td>" + name + "</td><td>" + "<a href='" + link + "'><img src='https://www.clipartkey.com/mpngs/m/84-840903_transparent-grass-tuft-clipart-weaknesses-icon.png' alt='link image' width='35px' height='35px'></a></td></tr>\n"
+            htmlCode+=html_row
     displayHTML(htmlCode)
 else: #make predictions by using the model
     UserID = UserID_query.collect()[0][1]
