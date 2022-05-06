@@ -189,7 +189,7 @@ client.transition_model_version_stage(name="G09_test", version=max_version, stag
 
 # COMMAND ----------
 
-butils.fs.rm("dbfs:/mnt/dscc202-datasets/misc/G09/token_model", True)
+dbutils.fs.rm("dbfs:/mnt/dscc202-datasets/misc/G09/token_model", True)
 
 # COMMAND ----------
 
